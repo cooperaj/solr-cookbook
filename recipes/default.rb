@@ -16,8 +16,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
+include_recipe "tomcat-solr::service"
+
 case node[:platform]
 when "debian", "ubuntu"
+
+    tomcat_group = "tomcat7"
+
     package "tomcat7" do
         action :install
     end
@@ -26,22 +32,44 @@ when "debian", "ubuntu"
     template "/var/lib/tomcat7/conf/Catalina/localhost/solr.xml" do
         source "tomcat_solr.xml.erb"
         owner "root"
-        group "tomcat"
+        group tomcat_group
         mode "0664"
+    end
+
+    # creating solr home and solr core
+    directory "#{node[:solr][:home]}" do
+        owner "root"
+        group tomcat_group
+        mode "0777"
+        action :create
+    end
+
+    if node['solr']['use_shared_data_dir'] then
+        execute "mount_solr_data_dir" do
+            command "mount -t vboxsf -o uid=`id -u tomcat7` -o gid=`id -g tomcat7` #{node['solr']['shared_data_dir_name']} #{node['solr']['home']}"
+            not_if "mount | grep '#{node['solr']['shared_data_dir_name']}' | grep -q \"uid=`id -u tomcat7`\""
+            action :run
+        end
     end
 
     # creating solr home and solr core
     directory "#{node[:solr][:home]}/#{node[:solr][:core_name]}" do
         owner "root"
-        group "tomcat"
+        group tomcat_group
         mode "0777"
         action :create
-        recursive true
     end
 
     directory "#{node[:solr][:home]}/#{node[:solr][:core_name]}/conf" do
         owner "root"
-        group "tomcat"
+        group tomcat_group
+        mode "0777"
+        action :create
+    end
+
+    directory "#{node[:solr][:home]}/#{node[:solr][:core_name]}/data" do
+        owner "root"
+        group tomcat_group
         mode "0777"
         action :create
     end
@@ -68,11 +96,25 @@ when "debian", "ubuntu"
         mode "0644"
     end
 
-    cookbook_file "/var/lib/tomcat7/webapps/solr.war" do
-        source "solr.war"
+    template "#{node[:solr][:home]}/#{node[:solr][:core_name]}/data/elevate.xml" do
+        source "elevate.xml.erb"
         owner "root"
         group "root"
         mode "0644"
-        #      notifies :restart, resources(:service => "tomcat7") 
+    end
+
+    # download a binary release...
+    remote_file "/tmp/apache-solr-4.0.0.tgz" do
+      source "http://archive.apache.org/dist/lucene/solr/4.0.0/apache-solr-4.0.0.tgz"
+      action :create_if_missing
+    end
+
+    # ...and extract solr.war for tomcat
+    execute "extract" do
+      command "tar xf apache-solr-4.0.0.tgz && cp apache-solr-4.0.0/example/webapps/solr.war /var/lib/tomcat7/webapps/solr.war"
+      creates "/var/lib/tomcat7/webapps/solr.war"
+      not_if { ::File.exists?("/var/lib/tomcat7/webapps/solr.war") }
+      cwd "/tmp"
+      notifies :restart, resources(:service => "tomcat7")
     end
 end
