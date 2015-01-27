@@ -17,8 +17,13 @@
 # limitations under the License.
 #
 
+include_recipe "tomcat-solr::service"
+
 case node[:platform]
 when "debian", "ubuntu"
+
+    tomcat_group = "tomcat"
+
     package "tomcat7" do
         action :install
     end
@@ -32,22 +37,44 @@ when "debian", "ubuntu"
     template "/var/lib/tomcat7/conf/Catalina/localhost/solr.xml" do
         source "tomcat_solr.xml.erb"
         owner "root"
-        group "tomcat"
+        group tomcat_group
         mode "0664"
+    end
+
+    # creating solr home and solr core
+    directory "#{node[:solr][:home]}" do
+        owner "root"
+        group tomcat_group
+        mode "0777"
+        action :create
+    end
+
+    if node['solr']['use_shared_data_dir'] then
+        execute "mount_solr_data_dir" do
+            command "mount -t vboxsf -o uid=`id -u tomcat7` -o gid=`id -g tomcat7` #{node['solr']['shared_data_dir_name']} #{node['solr']['home']}"
+            not_if "mount | grep '#{node['solr']['shared_data_dir_name']}' | grep -q \"uid=`id -u tomcat7`\""
+            action :run
+        end
     end
 
     # creating solr home and solr core
     directory "#{node[:solr][:home]}/#{node[:solr][:core_name]}" do
         owner "root"
-        group "tomcat"
+        group tomcat_group
         mode "0777"
         action :create
-        recursive true
     end
 
     directory "#{node[:solr][:home]}/#{node[:solr][:core_name]}/conf" do
         owner "root"
-        group "tomcat"
+        group tomcat_group
+        mode "0777"
+        action :create
+    end
+
+    directory "#{node[:solr][:home]}/#{node[:solr][:core_name]}/data" do
+        owner "root"
+        group tomcat_group
         mode "0777"
         action :create
     end
@@ -81,6 +108,13 @@ when "debian", "ubuntu"
         mode "0644"
     end
 
+    template "#{node[:solr][:home]}/#{node[:solr][:core_name]}/data/elevate.xml" do
+        source "elevate.xml.erb"
+        owner "root"
+        group "root"
+        mode "0644"
+    end
+
     #download solr
     remote_file "/tmp/solr.tgz" do
       source "http://archive.apache.org/dist/lucene/solr/#{node[:solr][:solr_version]}/solr-#{node[:solr][:solr_version]}.tgz"
@@ -99,11 +133,6 @@ when "debian", "ubuntu"
       not_if { ::File.exists?('/var/lib/tomcat7/webapps/solr.war') }
     end
 
-    #install cors filter
-    if node[:cors][:install]
-        # include_recipe 'solr-cookbook::cors'
-    end
-
     #cleaning
     bash 'Clean solr files' do
       cwd '/tmp'
@@ -111,9 +140,8 @@ when "debian", "ubuntu"
         rm solr.tgz
         rm -rf solr-#{node[:solr][:solr_version]}
         EOF
+      notifies :restart, resources(:service => "tomcat7")
     end
-
-    execute '/etc/init.d/tomcat7 restart'
 
     #configure solr logging
     directory "/var/lib/tomcat7/webapps/solr/WEB-INF/classes" do
@@ -121,6 +149,7 @@ when "debian", "ubuntu"
       group "root"
       mode "0644"
       action :create
+      notifies :restart, resources(:service => "tomcat7")
     end
 
     template "/var/lib/tomcat7/webapps/solr/WEB-INF/classes/log4j.properties" do
@@ -128,6 +157,7 @@ when "debian", "ubuntu"
         owner "root"
         group "root"
         mode "0644"
+        notifies :restart, resources(:service => "tomcat7")
     end
 
     template "/var/lib/tomcat7/webapps/solr/WEB-INF/classes/logging.properties" do
@@ -135,8 +165,7 @@ when "debian", "ubuntu"
         owner "root"
         group "root"
         mode "0644"
+        notifies :restart, resources(:service => "tomcat7")
     end
-
-    execute '/etc/init.d/tomcat7 restart'
 
 end
