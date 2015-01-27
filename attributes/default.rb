@@ -9,5 +9,6 @@ default[:solr][:log_level] = 'WARN'
 default[:cors][:install] = 1
 default[:cors][:cors_filter_version] = '1.7'
 default[:cors][:java_property_utils_version] = '1.9'
+
 default[:solr][:use_shared_data_dir] = false;
 default[:solr][:shared_data_dir_name] = 'solr';
